@@ -1,30 +1,142 @@
 (() => {
   const KEY = 'quota-pocket-v1';
   const CACHE = 'quota-pocket-last-results-v1';
+  const VAULT_FORMAT = 'quota-pocket-vault-v1';
+  const VAULT_ITERATIONS = 600000;
+  const encode = text => new TextEncoder().encode(text);
+  const decode = bytes => new TextDecoder().decode(bytes);
+  let vaultSession = null, writeQueue = Promise.resolve();
   const presets = [
     { id: 'dazhouzi', name: '大肘子', url: 'https://api.dzzi.ai', userId: '', token: '' },
     { id: 'ekan8', name: 'ekan8', url: 'https://api.ekan8.com', userId: '', token: '' },
     { id: 'xiaoji-farm', name: '小鸡农场', url: 'https://api.68886868.xyz', userId: '', token: '' },
   ];
-  function data() {
-    try {
-      const text = localStorage.getItem(KEY);
-      if (!text) return { sites: structuredClone(presets), proxy: { url: '', key: '' }, xiaojiPresetAdded: true };
-      const stored = JSON.parse(text);
-      if (!Array.isArray(stored.sites)) throw new Error();
-      if (!stored.xiaojiPresetAdded) {
-        if (!stored.sites.some(site => String(site.url || '').replace(/\/$/, '') === 'https://api.68886868.xyz')) {
-          stored.sites.push(structuredClone(presets[2]));
-        }
-        stored.xiaojiPresetAdded = true;
-        save(stored);
-      }
-      return stored;
-    } catch { throw new Error('无法读取本机数据，请检查浏览器存储是否可用。'); }
+  function rawData() {
+    try { return localStorage.getItem(KEY); }
+    catch { throw new Error('无法读取本机数据，请检查浏览器存储是否可用。'); }
   }
-  function save(value) {
-    try { localStorage.setItem(KEY, JSON.stringify(value)); }
+  function parseData(text) {
+    try { return JSON.parse(text); }
+    catch { throw new Error('无法读取本机数据，请检查浏览器存储是否可用。'); }
+  }
+  function writeData(text) {
+    try { localStorage.setItem(KEY, text); }
     catch { throw new Error('无法保存到浏览器，请检查设备存储空间与浏览器设置。'); }
+  }
+  function queueWrite(action) {
+    const next = writeQueue.then(action);
+    writeQueue = next.catch(() => {});
+    return next;
+  }
+  function vaultStatus() {
+    const raw = rawData(), record = raw ? parseData(raw) : null;
+    return { enabled: record?.format === VAULT_FORMAT, unlocked: Boolean(vaultSession && vaultSession.snapshot === raw) };
+  }
+  function data() {
+    const raw = rawData();
+    if (vaultSession && vaultSession.snapshot !== raw) throw new Error('本机配置已在其他页面更改，请刷新后重新打开。');
+    if (!raw) return { sites: structuredClone(presets), proxy: { url: '', key: '' }, xiaojiPresetAdded: true };
+    let stored = parseData(raw);
+    const encrypted = stored?.format === VAULT_FORMAT;
+    if (encrypted) {
+      if (!vaultSession) throw new Error('请先解锁本机加密。');
+      stored = structuredClone(vaultSession.state);
+    }
+    if (!stored || !Array.isArray(stored.sites)) throw new Error('无法读取本机数据，请检查浏览器存储是否可用。');
+    if (!stored.xiaojiPresetAdded) {
+      if (!stored.sites.some(site => String(site.url || '').replace(/\/$/, '') === 'https://api.68886868.xyz')) {
+        stored.sites.push(structuredClone(presets[2]));
+      }
+      stored.xiaojiPresetAdded = true;
+      if (!encrypted) writeData(JSON.stringify(stored));
+    }
+    return stored;
+  }
+  function base64(bytes) {
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+  function unbase64(value) {
+    const binary = atob(value);
+    return Uint8Array.from(binary, char => char.charCodeAt(0));
+  }
+  function requireCrypto() {
+    if (!crypto?.subtle || !crypto.getRandomValues) throw new Error('本机加密需要 HTTPS 或本机地址，以及支持 Web Crypto 的浏览器。');
+  }
+  async function deriveKey(password, salt) {
+    const material = await crypto.subtle.importKey('raw', encode(password), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: VAULT_ITERATIONS, hash: 'SHA-256' }, material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  async function seal(key, salt, state) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: encode(VAULT_FORMAT) }, key, encode(JSON.stringify(state)));
+    return JSON.stringify({ format: VAULT_FORMAT, kdf: 'PBKDF2-SHA256', iterations: VAULT_ITERATIONS, salt: base64(salt), iv: base64(iv), ciphertext: base64(new Uint8Array(ciphertext)) });
+  }
+  async function save(value) {
+    const raw = rawData(), record = raw ? parseData(raw) : null;
+    if (vaultSession && vaultSession.snapshot !== raw) throw new Error('本机配置已在其他页面更改，请刷新后重新打开。');
+    if (record?.format === VAULT_FORMAT) {
+      if (!vaultSession) throw new Error('请先解锁本机加密。');
+      const next = await seal(vaultSession.key, vaultSession.salt, value);
+      if (rawData() !== raw) throw new Error('本机配置已在其他页面更改，请刷新后重新打开。');
+      writeData(next);
+      vaultSession = { ...vaultSession, snapshot: next, state: structuredClone(value) };
+    } else {
+      writeData(JSON.stringify(value));
+    }
+  }
+  function enableVault(password) {
+    return queueWrite(async () => {
+      requireCrypto();
+      if (typeof password !== 'string' || password.length < 8) throw new Error('解锁密码请至少填写 8 位。');
+      if (vaultStatus().enabled) throw new Error('本机加密已经开启。');
+      const state = data(), before = rawData();
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const key = await deriveKey(password, salt), next = await seal(key, salt, state);
+      if (rawData() !== before) throw new Error('本机配置已在其他页面更改，请刷新后重新打开。');
+      writeData(next);
+      vaultSession = { key, salt, snapshot: next, state: structuredClone(state) };
+    });
+  }
+  function unlockVault(password) {
+    return queueWrite(async () => {
+      requireCrypto();
+      const raw = rawData(), record = raw ? parseData(raw) : null;
+      if (record?.format !== VAULT_FORMAT) throw new Error('本机没有开启加密。');
+      let salt, iv, ciphertext;
+      try {
+        if (record.kdf !== 'PBKDF2-SHA256' || record.iterations !== VAULT_ITERATIONS) throw new Error();
+        salt = unbase64(record.salt); iv = unbase64(record.iv); ciphertext = unbase64(record.ciphertext);
+        if (salt.length !== 16 || iv.length !== 12 || ciphertext.length < 16) throw new Error();
+      } catch { throw new Error('本机加密数据格式不正确，请检查浏览器数据。'); }
+      const key = await deriveKey(password, salt);
+      let state;
+      try {
+        const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: encode(VAULT_FORMAT) }, key, ciphertext);
+        state = JSON.parse(decode(plaintext));
+        if (!state || !Array.isArray(state.sites)) throw new Error();
+      } catch { throw new Error('解锁密码不正确，或本机加密数据已损坏。'); }
+      if (rawData() !== raw) throw new Error('本机配置已在其他页面更改，请刷新后重新打开。');
+      vaultSession = { key, salt, snapshot: raw, state };
+    });
+  }
+  function disableVault() {
+    return queueWrite(async () => {
+      const state = data(), before = rawData();
+      if (!vaultSession || !vaultStatus().enabled) throw new Error('请先解锁本机加密。');
+      if (rawData() !== before) throw new Error('本机配置已在其他页面更改，请刷新后重新打开。');
+      writeData(JSON.stringify(state));
+      vaultSession = null;
+    });
+  }
+  function resetVault() {
+    return queueWrite(async () => {
+      if (!vaultStatus().enabled) throw new Error('本机没有开启加密。');
+      try { localStorage.removeItem(CACHE); localStorage.removeItem(KEY); }
+      catch { throw new Error('无法清除本机配置，请检查浏览器存储设置。'); }
+      vaultSession = null;
+    });
   }
   function publicSite(site) {
     const { token, ...safe } = site;
@@ -52,37 +164,41 @@
     return site;
   }
   function upsert(input) {
-    const state = data();
-    const index = input.id ? state.sites.findIndex((site) => site.id === input.id) : -1;
-    if (input.id && index < 0) throw new Error('站点不存在，请刷新页面。');
-    const old = index < 0 ? null : state.sites[index];
-    const name = String(input.name || '').trim();
-    const url = originOf(input.url);
-    const userId = String(input.userId || '').trim();
-    const suppliedToken = String(input.token || '').trim().replace(/^Bearer\s+/i, '');
-    if (!name) throw new Error('请填写站点名称。');
-    if (userId && !/^\d+$/.test(userId)) throw new Error('用户 ID 应该是数字。');
-    if (!suppliedToken && old?.token && old.url !== url) throw new Error('更换站点地址后，请重新填写该站点的访问令牌。');
-    const token = suppliedToken || old?.token || '';
-    if (/[\r\n]/.test(token) || (token && !userId)) throw new Error('使用访问令牌时，请同时填写有效的用户 ID。');
-    const threshold = input.threshold === '' || input.threshold === null || input.threshold === undefined ? null : Number(input.threshold);
-    if (threshold !== null && (!Number.isFinite(threshold) || threshold < 0)) throw new Error('余额提醒请填写不小于零的数字。');
-    const costPerUnit = input.costPerUnit === '' || input.costPerUnit === null || input.costPerUnit === undefined ? null : Number(input.costPerUnit);
-    if (costPerUnit !== null && (!Number.isFinite(costPerUnit) || costPerUnit <= 0)) throw new Error('比价兑换比例需要大于零。');
-    const rechargeUrl = String(input.rechargeUrl || '').trim() ? httpsUrl(input.rechargeUrl, '充值页地址') : '';
-    const site = { id: old?.id || crypto.randomUUID(), name, url, userId, token, threshold, rechargeUrl, costPerUnit };
-    if (index < 0) state.sites.push(site); else state.sites[index] = site;
-    save(state);
-    removeCache(site.id);
-    return publicSite(site);
+    return queueWrite(async () => {
+      const state = data();
+      const index = input.id ? state.sites.findIndex((site) => site.id === input.id) : -1;
+      if (input.id && index < 0) throw new Error('站点不存在，请刷新页面。');
+      const old = index < 0 ? null : state.sites[index];
+      const name = String(input.name || '').trim();
+      const url = originOf(input.url);
+      const userId = String(input.userId || '').trim();
+      const suppliedToken = String(input.token || '').trim().replace(/^Bearer\s+/i, '');
+      if (!name) throw new Error('请填写站点名称。');
+      if (userId && !/^\d+$/.test(userId)) throw new Error('用户 ID 应该是数字。');
+      if (!suppliedToken && old?.token && old.url !== url) throw new Error('更换站点地址后，请重新填写该站点的访问令牌。');
+      const token = suppliedToken || old?.token || '';
+      if (/[\r\n]/.test(token) || (token && !userId)) throw new Error('使用访问令牌时，请同时填写有效的用户 ID。');
+      const threshold = input.threshold === '' || input.threshold === null || input.threshold === undefined ? null : Number(input.threshold);
+      if (threshold !== null && (!Number.isFinite(threshold) || threshold < 0)) throw new Error('余额提醒请填写不小于零的数字。');
+      const costPerUnit = input.costPerUnit === '' || input.costPerUnit === null || input.costPerUnit === undefined ? null : Number(input.costPerUnit);
+      if (costPerUnit !== null && (!Number.isFinite(costPerUnit) || costPerUnit <= 0)) throw new Error('比价兑换比例需要大于零。');
+      const rechargeUrl = String(input.rechargeUrl || '').trim() ? httpsUrl(input.rechargeUrl, '充值页地址') : '';
+      const site = { id: old?.id || crypto.randomUUID(), name, url, userId, token, threshold, rechargeUrl, costPerUnit };
+      if (index < 0) state.sites.push(site); else state.sites[index] = site;
+      await save(state);
+      removeCache(site.id);
+      return publicSite(site);
+    });
   }
   function remove(id) {
-    const state = data();
-    const next = state.sites.filter((site) => site.id !== id);
-    if (next.length === state.sites.length) throw new Error('站点不存在，请刷新页面。');
-    state.sites = next;
-    save(state);
-    removeCache(id);
+    return queueWrite(async () => {
+      const state = data();
+      const next = state.sites.filter((site) => site.id !== id);
+      if (next.length === state.sites.length) throw new Error('站点不存在，请刷新页面。');
+      state.sites = next;
+      await save(state);
+      removeCache(id);
+    });
   }
   function cache() {
     try { return JSON.parse(localStorage.getItem(CACHE) || '{}'); } catch { return {}; }
@@ -99,12 +215,14 @@
     return data().proxy || { url: '', key: '' };
   }
   function saveSettings(input) {
-    const state = data();
-    const url = String(input.url || '').trim() ? httpsUrl(input.url, '转发服务地址') : '';
-    const key = String(input.key || '').trim();
-    if (url && !key) throw new Error('请填写转发服务口令。');
-    state.proxy = { url, key: url ? key : '' };
-    save(state);
+    return queueWrite(async () => {
+      const state = data();
+      const url = String(input.url || '').trim() ? httpsUrl(input.url, '转发服务地址') : '';
+      const key = String(input.key || '').trim();
+      if (url && !key) throw new Error('请填写转发服务口令。');
+      state.proxy = { url, key: url ? key : '' };
+      await save(state);
+    });
   }
   async function remote(site, endpoint, authenticated, envelope = false) {
     const proxy = settings();
@@ -292,48 +410,53 @@
   }
   function favorites() { return favoriteValues(data()); }
   function toggleFavorite(value) {
-    const term = String(value || '').trim();
-    if (!term) throw new Error('先输入想收藏的模型名称。');
-    const state = data(), existing = favoriteValues(state);
-    const matched = existing.some(item => item.toLocaleLowerCase() === term.toLocaleLowerCase());
-    state.favorites = matched ? existing.filter(item => item.toLocaleLowerCase() !== term.toLocaleLowerCase()) : [...existing, term];
-    save(state);
-    return !matched;
+    return queueWrite(async () => {
+      const term = String(value || '').trim();
+      if (!term) throw new Error('先输入想收藏的模型名称。');
+      const state = data(), existing = favoriteValues(state);
+      const matched = existing.some(item => item.toLocaleLowerCase() === term.toLocaleLowerCase());
+      state.favorites = matched ? existing.filter(item => item.toLocaleLowerCase() !== term.toLocaleLowerCase()) : [...existing, term];
+      await save(state);
+      return !matched;
+    });
   }
   function exportSites() {
     const state = data();
     return { version: 1, favorites: favoriteValues(state), sites: state.sites.map(({ name, url, userId, threshold, rechargeUrl, costPerUnit }) => ({ name, url, userId, threshold: threshold ?? null, rechargeUrl: rechargeUrl || '', costPerUnit: costPerUnit ?? null })) };
   }
   function importSites(value) {
-    if (!value || value.version !== 1 || !Array.isArray(value.sites)) throw new Error('配置文件格式不正确。');
-    const state = data();
-    let added = 0, skipped = 0, favoritesAdded = 0;
-    for (const item of value.sites) {
-      try {
-        const name = String(item.name || '').trim(), url = originOf(item.url), userId = String(item.userId || '').trim();
-        if (!name || (userId && !/^\d+$/.test(userId))) throw new Error();
-        if (state.sites.some((site) => site.name === name && site.url === url && site.userId === userId)) { skipped++; continue; }
-        const threshold = item.threshold == null ? null : Number(item.threshold);
-        if (threshold !== null && (!Number.isFinite(threshold) || threshold < 0)) throw new Error();
-        const costPerUnit = item.costPerUnit == null ? null : Number(item.costPerUnit);
-        if (costPerUnit !== null && (!Number.isFinite(costPerUnit) || costPerUnit <= 0)) throw new Error();
-        const rechargeUrl = item.rechargeUrl ? httpsUrl(item.rechargeUrl, '充值页地址') : '';
-        state.sites.push({ id: crypto.randomUUID(), name, url, userId, token: '', threshold, rechargeUrl, costPerUnit }); added++;
-      } catch { skipped++; }
-    }
-    const savedFavorites = favoriteValues(state);
-    for (const item of Array.isArray(value.favorites) ? value.favorites : []) {
-      if (typeof item !== 'string') continue;
-      const term = item.trim();
-      if (term && !savedFavorites.some(existing => existing.toLocaleLowerCase() === term.toLocaleLowerCase())) { savedFavorites.push(term); favoritesAdded++; }
-    }
-    state.favorites = savedFavorites;
-    save(state);
-    return { added, skipped, favoritesAdded };
+    return queueWrite(async () => {
+      if (!value || value.version !== 1 || !Array.isArray(value.sites)) throw new Error('配置文件格式不正确。');
+      const state = data();
+      let added = 0, skipped = 0, favoritesAdded = 0;
+      for (const item of value.sites) {
+        try {
+          const name = String(item.name || '').trim(), url = originOf(item.url), userId = String(item.userId || '').trim();
+          if (!name || (userId && !/^\d+$/.test(userId))) throw new Error();
+          if (state.sites.some((site) => site.name === name && site.url === url && site.userId === userId)) { skipped++; continue; }
+          const threshold = item.threshold == null ? null : Number(item.threshold);
+          if (threshold !== null && (!Number.isFinite(threshold) || threshold < 0)) throw new Error();
+          const costPerUnit = item.costPerUnit == null ? null : Number(item.costPerUnit);
+          if (costPerUnit !== null && (!Number.isFinite(costPerUnit) || costPerUnit <= 0)) throw new Error();
+          const rechargeUrl = item.rechargeUrl ? httpsUrl(item.rechargeUrl, '充值页地址') : '';
+          state.sites.push({ id: crypto.randomUUID(), name, url, userId, token: '', threshold, rechargeUrl, costPerUnit }); added++;
+        } catch { skipped++; }
+      }
+      const savedFavorites = favoriteValues(state);
+      for (const item of Array.isArray(value.favorites) ? value.favorites : []) {
+        if (typeof item !== 'string') continue;
+        const term = item.trim();
+        if (term && !savedFavorites.some(existing => existing.toLocaleLowerCase() === term.toLocaleLowerCase())) { savedFavorites.push(term); favoritesAdded++; }
+      }
+      state.favorites = savedFavorites;
+      await save(state);
+      return { added, skipped, favoritesAdded };
+    });
   }
   window.ledger = {
     sites: () => data().sites.map(publicSite), upsert, remove, settings, saveSettings,
     refresh, logs, usagePage, usageUnit, diagnose, recharge, pricing, performance,
     favorites, toggleFavorite, cache, exportSites, importSites,
+    vaultStatus, enableVault, unlockVault, disableVault, resetVault,
   };
 })();

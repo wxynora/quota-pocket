@@ -47,9 +47,9 @@ function render() {
     const card = template.content.firstElementChild.cloneNode(true);
     card.classList.add(`tone-${index % 4}`);
     card.querySelector('.site-icon').innerHTML = icons[index % icons.length];
-    card.querySelector('.site-name').textContent = site.name;
+    card.querySelector('.site-name-text').textContent = site.name;
     const link = card.querySelector('.site-link');
-    link.textContent = `↗ ${site.url.replace(/^https?:\/\//, '')}`; link.href = site.url;
+    link.href = site.url;
     const state = card.querySelector('.site-state'), result = results.get(site.id);
     if (result?.ok) {
       for (const key of ['remaining', 'used', 'today', 'month']) card.querySelector(`[data-value="${key}"]`).textContent = formatQuota(result[key], result.unit);
@@ -102,6 +102,9 @@ async function refreshAll() {
 }
 function editSite(site = null) {
   form.reset();
+  $('#storage-note').textContent = window.ledger.vaultStatus().enabled
+    ? '站点配置已在此设备加密保存；导出配置不包含令牌。'
+    : '令牌在此设备的浏览器中明文保存；可在首页开启本机加密。';
   $('#ratio-message').textContent = '填入两个数字，自动计算下方的比例。';
   $('#site-id').value = site?.id || ''; $('#site-name').value = site?.name || ''; $('#site-url').value = site?.url || '';
   $('#user-id').value = site?.userId || ''; $('#threshold').value = site?.threshold ?? ''; $('#recharge-url').value = site?.rechargeUrl || ''; $('#cost-per-unit').value = site?.costPerUnit ?? '';
@@ -128,7 +131,7 @@ $('#recharge-received').addEventListener('input', updateRechargeRatio);
 form.addEventListener('submit', async (event) => {
   event.preventDefault(); const button = $('#save-site'); button.disabled = true; $('#form-error').hidden = true;
   try {
-    const site = window.ledger.upsert({ id: $('#site-id').value || undefined, name: $('#site-name').value, url: $('#site-url').value, userId: $('#user-id').value, token: $('#token').value, threshold: $('#threshold').value, rechargeUrl: $('#recharge-url').value, costPerUnit: $('#cost-per-unit').value });
+    const site = await window.ledger.upsert({ id: $('#site-id').value || undefined, name: $('#site-name').value, url: $('#site-url').value, userId: $('#user-id').value, token: $('#token').value, threshold: $('#threshold').value, rechargeUrl: $('#recharge-url').value, costPerUnit: $('#cost-per-unit').value });
     const index = sites.findIndex((item) => item.id === site.id);
     if (index < 0) sites.push(site); else sites[index] = site;
     results.delete(site.id); dialog.close(); $('#token').value = '';
@@ -137,11 +140,11 @@ form.addEventListener('submit', async (event) => {
   } catch (error) { $('#form-error').textContent = error.message; $('#form-error').hidden = false; }
   finally { button.disabled = false; }
 });
-function removeSite(site) {
+async function removeSite(site) {
   if (!site || !confirm(`从额度口袋移除「${site.name}」？这只会删除本机保存的配置。`)) return;
   try {
     const id = site.id;
-    window.ledger.remove(id); versions.set(id, (versions.get(id) || 0) + 1); running.delete(id); results.delete(id);
+    await window.ledger.remove(id); versions.set(id, (versions.get(id) || 0) + 1); running.delete(id); results.delete(id);
     sites = sites.filter((item) => item.id !== id);
     if (dialog.open) dialog.close();
     render();
@@ -156,9 +159,9 @@ $('#open-settings').addEventListener('click', () => {
   $('#settings-error').hidden = true; $('#settings-dialog').showModal();
 });
 $('#settings-close').addEventListener('click', () => $('#settings-dialog').close());
-$('#settings-form').addEventListener('submit', (event) => {
+$('#settings-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  try { window.ledger.saveSettings({ url: $('#proxy-url').value, key: $('#proxy-key').value }); $('#settings-dialog').close(); footerMessage = '设置已保存。'; render(); }
+  try { await window.ledger.saveSettings({ url: $('#proxy-url').value, key: $('#proxy-key').value }); $('#settings-dialog').close(); footerMessage = '设置已保存。'; render(); }
   catch (error) { $('#settings-error').textContent = error.message; $('#settings-error').hidden = false; }
 });
 $('#export-sites').addEventListener('click', () => {
@@ -171,7 +174,7 @@ $('#import-sites').addEventListener('click', () => $('#import-file').click());
 $('#import-file').addEventListener('change', async (event) => {
   try {
     const file = event.target.files[0]; if (!file) return;
-    const { added, skipped, favoritesAdded } = window.ledger.importSites(JSON.parse(await file.text()));
+    const { added, skipped, favoritesAdded } = await window.ledger.importSites(JSON.parse(await file.text()));
     sites = window.ledger.sites(); footerMessage = `已导入 ${added} 个站点、${favoritesAdded} 个常用模型，跳过 ${skipped} 个重复或无效站点；请分别连接账号。`; render();
   } catch (error) { footerMessage = `导入失败：${error.message}`; render(); }
   finally { event.target.value = ''; }
@@ -198,7 +201,10 @@ function renderFavorites() {
     const open = textEl('button', term); open.type = 'button'; open.addEventListener('click', () => openCompare(term));
     const remove = textEl('button', '×', 'favorite-remove'); remove.type = 'button';
     remove.setAttribute('aria-label', `取消收藏 ${term}`);
-    remove.addEventListener('click', () => { window.ledger.toggleFavorite(term); renderFavorites(); });
+    remove.addEventListener('click', async () => {
+      try { await window.ledger.toggleFavorite(term); renderFavorites(); }
+      catch (error) { footerMessage = error.message; $('.footer').hidden = false; $('#footer-message').textContent = error.message; }
+    });
     chip.append(open, remove); list.append(chip);
   }
 }
@@ -312,15 +318,81 @@ function renderModels() {
 $('#models-close').addEventListener('click', () => { $('#models-dialog').close(); modelState = null; });
 $('#model-search').addEventListener('input', renderModels); $('#model-group').addEventListener('change', renderModels);
 
-function start() {
+function vaultError(selector, error) {
+  const target = $(selector); target.textContent = error.message; target.hidden = false;
+}
+let vaultProcessing = false;
+function vaultBusy(busy) {
+  vaultProcessing = busy;
+  for (const id of ['#vault-enable', '#vault-disable', '#vault-close', '#vault-cancel']) $(id).disabled = busy;
+}
+$('#vault-open').addEventListener('click', () => {
   try {
+    const enabled = window.ledger.vaultStatus().enabled;
+    $('#vault-form').reset(); $('#vault-error').hidden = true;
+    $('#vault-description').textContent = enabled ? '本机加密已开启。' : '加密是可选的，只在这台设备上生效。';
+    $('#vault-enable-fields').hidden = enabled; $('#vault-enable').hidden = enabled; $('#vault-disable').hidden = !enabled;
+    $('#vault-dialog').showModal();
+  } catch (error) { footerMessage = error.message; $('#footer-message').textContent = error.message; $('.footer').hidden = false; }
+});
+$('#vault-close').addEventListener('click', () => $('#vault-dialog').close());
+$('#vault-cancel').addEventListener('click', () => $('#vault-dialog').close());
+$('#vault-dialog').addEventListener('cancel', event => { if (vaultProcessing) event.preventDefault(); });
+$('#vault-dialog').addEventListener('close', () => $('#vault-form').reset());
+$('#vault-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); $('#vault-error').hidden = true;
+  if ($('#vault-password').value !== $('#vault-confirm').value) { vaultError('#vault-error', new Error('两次输入的密码不一致。')); return; }
+  vaultBusy(true);
+  try {
+    await window.ledger.enableVault($('#vault-password').value);
+    $('#vault-dialog').close(); footerMessage = '本机加密已开启。'; render();
+  } catch (error) { vaultError('#vault-error', error); }
+  finally { vaultBusy(false); }
+});
+$('#vault-disable').addEventListener('click', async () => {
+  if (!confirm('关闭后，站点令牌和转发口令会在本机浏览器中明文保存。确定关闭吗？')) return;
+  $('#vault-error').hidden = true; vaultBusy(true);
+  try { await window.ledger.disableVault(); $('#vault-dialog').close(); footerMessage = '本机加密已关闭。'; render(); }
+  catch (error) { vaultError('#vault-error', error); }
+  finally { vaultBusy(false); }
+});
+$('#unlock-dialog').addEventListener('cancel', event => event.preventDefault());
+$('#unlock-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); $('#unlock-error').hidden = true;
+  $('#unlock-submit').disabled = true; $('#vault-reset').disabled = true;
+  try {
+    await window.ledger.unlockVault($('#unlock-password').value);
+    $('#unlock-password').value = ''; $('#unlock-dialog').close(); start();
+  } catch (error) { vaultError('#unlock-error', error); }
+  finally { $('#unlock-submit').disabled = false; $('#vault-reset').disabled = false; }
+});
+$('#vault-reset').addEventListener('click', async () => {
+  if (!confirm('忘记密码无法恢复加密配置。确定清除此设备上的额度口袋站点、令牌、收藏和余额快照，重新开始吗？')) return;
+  $('#unlock-error').hidden = true; $('#unlock-submit').disabled = true; $('#vault-reset').disabled = true;
+  try {
+    await window.ledger.resetVault(); results.clear(); $('#unlock-password').value = ''; $('#unlock-dialog').close(); start();
+    footerMessage = '已清除此设备的额度口袋配置，请重新连接站点。'; render();
+  } catch (error) { vaultError('#unlock-error', error); }
+  finally { $('#unlock-submit').disabled = false; $('#vault-reset').disabled = false; }
+});
+window.addEventListener('storage', event => {
+  if (event.key !== 'quota-pocket-v1') return;
+  $('#summary').textContent = '本机配置已在其他页面更改，请刷新';
+  footerMessage = '本机配置已在其他页面更改，请刷新后继续使用。';
+  $('#footer-message').textContent = footerMessage; $('.footer').hidden = false;
+});
+
+function start() {
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
+  try {
+    const vault = window.ledger.vaultStatus();
+    if (vault.enabled && !vault.unlocked) { $('#unlock-dialog').showModal(); return; }
     sites = window.ledger.sites();
     for (const [id, result] of results) results.set(id, { ...result, stale: true });
     render();
     if (sites.some((site) => site.configured) && navigator.onLine) refreshAll();
     else if (!navigator.onLine) { footerMessage = '当前离线，显示上次保存的结果。'; render(); }
   } catch (error) { $('#summary').textContent = '额度口袋暂时打不开'; $('#footer-message').textContent = error.message; $('.footer').hidden = false; }
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
 start();
 
@@ -412,8 +484,8 @@ function updateFavoriteButton() {
   button.setAttribute('aria-pressed', saved ? 'true' : 'false');
 }
 $('#compare-open').addEventListener('click', () => openCompare());
-$('#favorite-model').addEventListener('click', () => {
-  try { window.ledger.toggleFavorite($('#compare-search').value); updateFavoriteButton(); renderFavorites(); }
+$('#favorite-model').addEventListener('click', async () => {
+  try { await window.ledger.toggleFavorite($('#compare-search').value); updateFavoriteButton(); renderFavorites(); }
   catch (error) { $('#compare-message').textContent = error.message; }
 });
 $('#compare-close').addEventListener('click', () => { $('#compare-dialog').close(); compareState = null; });

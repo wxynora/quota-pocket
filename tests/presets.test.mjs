@@ -16,7 +16,7 @@ test('new browser starts with 小鸡农场 and without the retired preset', () =
   assert.ok(!ledger.sites().some(site => site.id === 'jiushi'));
 });
 
-test('existing configurations get 小鸡农场 once without losing credentials or re-adding it after deletion', () => {
+test('existing configurations get 小鸡农场 once without losing credentials or re-adding it after deletion', async () => {
   const previous = { sites: [{ id: 'old', name: '旧站点', url: 'https://old.example', userId: '4', token: 'fixture-token' }], proxy: { url: '', key: '' } };
   const storage = new Map([['quota-pocket-v1', JSON.stringify(previous)]]);
   const ledger = ledgerFor(storage);
@@ -24,7 +24,7 @@ test('existing configurations get 小鸡农场 once without losing credentials o
   assert.equal(ledger.sites().filter(site => site.url === 'https://api.68886868.xyz').length, 1);
   assert.equal(JSON.parse(storage.get('quota-pocket-v1')).sites[0].token, 'fixture-token');
   const farm = ledger.sites().find(site => site.url === 'https://api.68886868.xyz');
-  ledger.remove(farm.id);
+  await ledger.remove(farm.id);
   assert.ok(!ledger.sites().some(site => site.url === 'https://api.68886868.xyz'));
 });
 

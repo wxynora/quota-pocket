@@ -16,19 +16,19 @@ function makeLedger(fetchImpl = async () => { throw Error('unexpected network');
   return context.window.ledger;
 }
 
-test('favorites preserve site credentials, survive reload, and export without credentials', () => {
+test('favorites preserve site credentials, survive reload, and export without credentials', async () => {
   const storage = new Map(), ledger = makeLedger(undefined, storage);
-  ledger.upsert({ name: '测试', url: 'https://site.example', userId: '12', token: 'fake-secret' });
-  assert.equal(ledger.toggleFavorite(' Claude-Opus '), true);
+  await ledger.upsert({ name: '测试', url: 'https://site.example', userId: '12', token: 'fake-secret' });
+  assert.equal(await ledger.toggleFavorite(' Claude-Opus '), true);
   assert.deepEqual([...ledger.favorites()], ['Claude-Opus']);
   assert.deepEqual([...makeLedger(undefined, storage).favorites()], ['Claude-Opus']);
   assert.equal(ledger.sites().find(x => x.id === 'my-site').configured, true);
   const exported = ledger.exportSites();
   assert.doesNotMatch(JSON.stringify(exported), /fake-secret/);
   assert.deepEqual([...exported.favorites], ['Claude-Opus']);
-  assert.equal(ledger.toggleFavorite('claude-opus'), false);
+  assert.equal(await ledger.toggleFavorite('claude-opus'), false);
   assert.deepEqual([...ledger.favorites()], []);
-  ledger.importSites(exported);
+  await ledger.importSites(exported);
   assert.deepEqual([...ledger.favorites()], ['Claude-Opus']);
 });
 
@@ -43,7 +43,7 @@ test('self-check reports each read-only endpoint independently and redacts token
     if (body.endpoint === '/api/status') return Response.json({ success: true, data: { quota_display_type: 'USD', quota_per_unit: 500000 } });
     throw Error('unexpected endpoint');
   });
-  ledger.upsert({ name: '测试', url: 'https://site.example', userId: '12', token: 'fake-secret' });
+  await ledger.upsert({ name: '测试', url: 'https://site.example', userId: '12', token: 'fake-secret' });
   const result = await ledger.diagnose('my-site');
   assert.equal(result.items.length, 4);
   assert.equal(result.items[0].ok, false);
@@ -59,7 +59,7 @@ test('usage pagination sends the requested date window and type to the station',
     const body = JSON.parse(options.body); seen.push(body.endpoint);
     return Response.json({ success: true, data: { items: [], page: 2, page_size: 100, total: 0 } });
   });
-  ledger.upsert({ name: '测试', url: 'https://site.example', userId: '12', token: 'fake-secret' });
+  await ledger.upsert({ name: '测试', url: 'https://site.example', userId: '12', token: 'fake-secret' });
   await ledger.usagePage('my-site', 2, 123, 456);
   const url = new URL(seen[0], 'https://site.example');
   assert.equal(url.pathname, '/api/log/self');

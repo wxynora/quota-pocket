@@ -19,7 +19,7 @@ async function makeLedger(profileResponse) {
     },
   };
   vm.runInNewContext(await readFile(new URL('../public/local.js', import.meta.url), 'utf8'), context);
-  context.window.ledger.upsert({ name: '测试站', url: 'https://example.test', userId: '12', token: 'test-sensitive-token' });
+  await context.window.ledger.upsert({ name: '测试站', url: 'https://example.test', userId: '12', token: 'test-sensitive-token' });
   return context.window.ledger;
 }
 

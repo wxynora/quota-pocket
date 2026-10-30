@@ -60,7 +60,7 @@ test('performance uses the public endpoint without forwarding the saved site tok
   };
   vm.runInNewContext(await readFile(new URL('../public/local.js', import.meta.url), 'utf8'), context);
   const ledger = context.window.ledger;
-  ledger.upsert({ name: '测试', url: 'https://site.example', userId: '1', token: 'fixture-token' });
+  await ledger.upsert({ name: '测试', url: 'https://site.example', userId: '1', token: 'fixture-token' });
   const result = await ledger.performance('site-id');
   assert.equal(result.models[0].success_rate, 100);
   assert.equal(requests.length, 1);

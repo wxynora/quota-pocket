@@ -40,7 +40,7 @@
       <div class="section-heading"><h1>我的站点 <span aria-hidden="true">✳</span></h1><div class="summary" id="summary">正在打开小账本…</div></div>
       <div class="section-tools">
         <div class="filters"><input type="search" id="search" aria-label="搜索站点" placeholder="搜索站点或地址"><select id="filter" aria-label="筛选站点"><option value="all">全部站点</option><option value="low">余额偏低</option><option value="unconnected">待连接</option></select></div>
-        <div class="transfer"><button type="button" id="bill-open">用量账单</button><button type="button" id="import-sites">导入配置</button><button type="button" id="export-sites">导出配置</button><input type="file" id="import-file" accept="application/json,.json" hidden></div>
+        <div class="transfer"><button type="button" id="bill-open">用量账单</button><button type="button" id="vault-open">本机加密</button><button type="button" id="import-sites">导入配置</button><button type="button" id="export-sites">导出配置</button><input type="file" id="import-file" accept="application/json,.json" hidden></div>
       </div>
       <div id="site-list" class="site-list" aria-live="polite"></div>
       <p class="empty-list" id="empty-list" hidden>这里还没有站点，点右上角添加一个吧。</p>
@@ -56,7 +56,7 @@
       <button type="button" class="site-delete" aria-label="删除站点">×</button>
       <div class="site-identity">
         <span class="site-icon" aria-hidden="true"></span>
-        <div class="site-name-wrap"><h2 class="site-name"></h2><a class="site-link" target="_blank" rel="noopener noreferrer"></a><p class="site-state"></p></div>
+        <div class="site-name-wrap"><div class="site-name-row"><h2 class="site-name"><a class="site-link" target="_blank" rel="noopener noreferrer"><span class="site-name-text"></span><span aria-hidden="true">↗</span></a></h2><button type="button" class="text-action diagnostic-action">自检</button></div><p class="site-state"></p></div>
       </div>
       <dl class="metrics">
         <div><dt>剩余额度</dt><dd data-value="remaining">—</dd></div>
@@ -64,7 +64,7 @@
         <div><dt>今日用量</dt><dd data-value="today">—</dd></div>
         <div><dt>本月用量</dt><dd data-value="month">—</dd></div>
       </dl>
-      <div class="site-actions"><button type="button" class="mini-refresh" aria-label="刷新站点">↻</button><button type="button" class="pill site-action"></button><button type="button" class="text-action diagnostic-action">自检</button><button type="button" class="text-action models-action">模型价格</button><button type="button" class="text-action logs-action">调用日志</button><button type="button" class="text-action recharge-action">去充值 ↗</button></div>
+      <div class="site-actions"><button type="button" class="mini-refresh" aria-label="刷新站点">↻</button><button type="button" class="pill site-action"></button><button type="button" class="text-action models-action">模型价格</button><button type="button" class="text-action logs-action">调用日志</button><button type="button" class="text-action recharge-action">去充值 ↗</button></div>
     </article>
   </template>
 
@@ -97,7 +97,7 @@
       <label for="cost-per-unit">比价兑换比例（可选）</label>
       <input id="cost-per-unit" name="costPerUnit" type="number" min="0.00000001" step="any" placeholder="留空按 1:1 计算">
       <p class="form-help">例如花 ¥50 充值得到 100 站内额度，填 0.5；不填默认按 1:1 换算。</p>
-      <p class="form-help storage-note">令牌保存在此设备的浏览器数据中，未加密；导出配置不包含令牌。</p>
+      <p class="form-help storage-note" id="storage-note">令牌保存在此设备的浏览器数据中；导出配置不包含令牌。</p>
       <p id="form-error" class="form-error" role="alert" hidden></p>
       <div class="dialog-actions"><button type="button" class="delete-button" id="delete-site" hidden>移除站点</button><span class="action-spacer"></span><button type="button" class="cancel-button" id="cancel-dialog">取消</button><button class="save-button" type="submit" id="save-site">保存</button></div>
     </form>
@@ -158,6 +158,32 @@
         <div id="bill-models" class="bill-section"></div>
       </div>
     </div>
+  </dialog>
+
+  <dialog id="vault-dialog" aria-labelledby="vault-title">
+    <form id="vault-form">
+      <div class="dialog-heading"><div><p class="dialog-kicker">LOCAL LOCK</p><h2 id="vault-title">本机加密</h2></div><button type="button" id="vault-close" class="close-button" aria-label="关闭">×</button></div>
+      <p class="dialog-desc" id="vault-description"></p>
+      <div id="vault-enable-fields">
+        <label for="vault-password">设置本机解锁密码</label><input id="vault-password" type="password" autocomplete="new-password" minlength="8" required>
+        <label for="vault-confirm">再输入一次密码</label><input id="vault-confirm" type="password" autocomplete="new-password" minlength="8" required>
+        <p class="form-help">至少 8 位，建议使用较长且独立的密码。页面重新加载后需要解锁；忘记密码无法恢复加密配置。</p>
+      </div>
+      <p class="form-help">保护保存在此设备的站点配置和令牌；余额离线快照未加密。查询时令牌仍会经过你选择的查询服务。</p>
+      <p id="vault-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" id="vault-disable" class="delete-button" hidden>关闭加密</button><span class="action-spacer"></span><button type="button" id="vault-cancel" class="cancel-button">取消</button><button type="submit" id="vault-enable" class="save-button">开启加密</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="unlock-dialog" aria-labelledby="unlock-title">
+    <form id="unlock-form">
+      <div class="dialog-heading"><div><p class="dialog-kicker">LOCAL LOCK</p><h2 id="unlock-title">解锁本机配置</h2></div></div>
+      <p class="dialog-desc">输入此设备设置的解锁密码，继续使用额度口袋。</p>
+      <label for="unlock-password">本机解锁密码</label><input id="unlock-password" type="password" autocomplete="current-password" required>
+      <p id="unlock-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" id="vault-reset" class="delete-button">忘记密码</button><span class="action-spacer"></span><button type="submit" id="unlock-submit" class="save-button">解锁</button></div>
+      <p class="form-help">忘记密码无法恢复加密数据；可清除本设备的额度口袋配置后重新连接站点。</p>
+    </form>
   </dialog>
 
   <dialog id="settings-dialog" aria-labelledby="settings-title">
