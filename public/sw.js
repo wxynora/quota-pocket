@@ -1,4 +1,4 @@
-const CACHE = 'quota-pocket-shell-v17';
+const CACHE = 'quota-pocket-shell-v18';
 const FILES = ['./', './index.html', './style.css', './local.js', './app.js', './pricing.mjs', './usage.mjs', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)).then(() => self.skipWaiting()));
