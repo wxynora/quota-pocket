@@ -1,0 +1,27 @@
+# 将这些 location 放进已有的 HTTPS server 块，不要新建或覆盖整个 server。
+# 示例端口：额度口袋 18741、密码页 18743；若已占用，须连同两个服务的端口一起修改。
+location = /__quota-pocket-auth-check {
+    internal;
+    proxy_pass http://127.0.0.1:18743/check;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Cookie $http_cookie;
+}
+
+location = /quota-pocket-login { return 301 /quota-pocket-login/; }
+location ^~ /quota-pocket-login/ {
+    proxy_pass http://127.0.0.1:18743/;
+    proxy_set_header Host 127.0.0.1:18743;
+    proxy_set_header X-Real-IP $remote_addr;
+}
+
+location = /quota-pocket { return 301 /quota-pocket/; }
+location @quota_pocket_login {
+    return 302 /quota-pocket-login/?next=/quota-pocket/;
+}
+location ^~ /quota-pocket/ {
+    auth_request /__quota-pocket-auth-check;
+    error_page 401 = @quota_pocket_login;
+    proxy_pass http://127.0.0.1:18741/;
+    proxy_set_header Host 127.0.0.1:18741;
+}

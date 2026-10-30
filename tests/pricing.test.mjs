@@ -1,14 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { simpleExpression, priceDetails, compareQuote } from '../public/pricing.mjs';
+import { simpleExpression, priceDetails, compareQuote, rechargeRatio } from '../public/pricing.mjs';
 
 const data = { ratios: { vip: 2 }, unit: { factor: 7 / 500000, symbol: '¥', suffix: '', note: '' }, status: { quota_per_unit: 500000 } };
+
+test('充值金额除以到账单位，空值或无效数字不生成比例', () => {
+  assert.equal(rechargeRatio('50', '100'), 0.5);
+  assert.equal(rechargeRatio('100', '600'), 0.166666666667);
+  assert.equal(rechargeRatio('', '100'), null);
+  assert.equal(rechargeRatio('50', '0'), null);
+  assert.equal(rechargeRatio('-1', '100'), null);
+});
 
 test('按站点倍率、分组、输出倍率和充值兑换比例换算', () => {
   const model = { quota_type: 0, model_ratio: 0.5, completion_ratio: 4 };
   assert.deepEqual(priceDetails(model, 'vip', data), { type: 'token', input: 14, output: 56 });
   assert.deepEqual(compareQuote(model, 'vip', data, { costPerUnit: 0.5 }), { type: 'token', input: 7, output: 28 });
-  assert.match(compareQuote(model, 'vip', data, {}).reason, /兑换比例/);
+  const withoutExchange = compareQuote(model, 'vip', data, {});
+  assert.deepEqual(withoutExchange, { type: 'token', input: 14, output: 56 });
+  assert.deepEqual(compareQuote(model, 'vip', data, { costPerUnit: null }), withoutExchange);
 });
 
 test('识别 New API 的简单表达式，并保留分组与站点单位', () => {

@@ -36,14 +36,31 @@ export function priceDetails(model, group, data) {
 export function compareQuote(model, group, data, site) {
   const price = priceDetails(model, group, data);
   if (!price.type) return price;
-  if (typeof site.costPerUnit !== 'number' || !Number.isFinite(site.costPerUnit) || site.costPerUnit <= 0) return { reason: '请在站点设置中填写兑换比例' };
+  const costPerUnit = site.costPerUnit == null || site.costPerUnit === '' ? 1 : site.costPerUnit;
+  if (typeof costPerUnit !== 'number' || !Number.isFinite(costPerUnit) || costPerUnit <= 0) return { reason: '兑换比例不正确，请在站点设置中修改', original: price };
   if (price.type === 'token') {
-    const input = price.input * site.costPerUnit, output = price.output * site.costPerUnit;
+    const input = price.input * costPerUnit, output = price.output * costPerUnit;
     if (Number.isFinite(input) && Number.isFinite(output)) return { type: 'token', input, output };
   }
   if (price.type === 'call') {
-    const call = price.call * site.costPerUnit;
+    const call = price.call * costPerUnit;
     if (Number.isFinite(call)) return { type: 'call', call };
   }
   return { reason: '站点价格信息不完整' };
+}
+
+export function rechargeRatio(paid, received) {
+  if (!String(paid ?? '').trim() || !String(received ?? '').trim()) return null;
+  const amount = Number(paid), units = Number(received), ratio = amount / units;
+  return amount > 0 && units > 0 && Number.isFinite(ratio) && ratio > 0 ? Number(ratio.toPrecision(12)) : null;
+}
+
+export function modelStatus(modelName, metrics) {
+  if (!Array.isArray(metrics?.models)) return { label: '状态未知', tone: 'unknown' };
+  const item = metrics.models.find((entry) => entry?.model_name === modelName);
+  if (!item) return { label: '近 1 小时无记录', tone: 'unknown' };
+  const rate = item.success_rate;
+  if (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0 || rate > 100) return { label: '状态未知', tone: 'unknown' };
+  const formatted = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(rate);
+  return { label: `近 1 小时成功率 ${formatted}%`, tone: rate === 100 ? 'good' : rate === 0 ? 'bad' : 'mixed' };
 }

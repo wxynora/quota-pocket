@@ -4,14 +4,21 @@
   const presets = [
     { id: 'dazhouzi', name: '大肘子', url: 'https://api.dzzi.ai', userId: '', token: '' },
     { id: 'ekan8', name: 'ekan8', url: 'https://api.ekan8.com', userId: '', token: '' },
-    { id: 'jiushi', name: '玖时', url: 'https://api.jiushi.xin', userId: '', token: '' },
+    { id: 'xiaoji-farm', name: '小鸡农场', url: 'https://api.68886868.xyz', userId: '', token: '' },
   ];
   function data() {
     try {
       const text = localStorage.getItem(KEY);
-      if (!text) return { sites: structuredClone(presets), proxy: { url: '', key: '' } };
+      if (!text) return { sites: structuredClone(presets), proxy: { url: '', key: '' }, xiaojiPresetAdded: true };
       const stored = JSON.parse(text);
       if (!Array.isArray(stored.sites)) throw new Error();
+      if (!stored.xiaojiPresetAdded) {
+        if (!stored.sites.some(site => String(site.url || '').replace(/\/$/, '') === 'https://api.68886868.xyz')) {
+          stored.sites.push(structuredClone(presets[2]));
+        }
+        stored.xiaojiPresetAdded = true;
+        save(stored);
+      }
       return stored;
     } catch { throw new Error('无法读取本机数据，请检查浏览器存储是否可用。'); }
   }
@@ -101,6 +108,10 @@
   }
   async function remote(site, endpoint, authenticated, envelope = false) {
     const proxy = settings();
+    const useLocalService = !proxy.url && (
+      (location.protocol === 'http:' && location.hostname === '127.0.0.1') ||
+      document.querySelector('meta[name="quota-pocket-service"]')?.content === 'same-origin'
+    );
     let response;
     try {
       if (proxy.url) {
@@ -109,21 +120,49 @@
           body: JSON.stringify({ site: site.url, endpoint, userId: authenticated ? site.userId : '', token: authenticated ? site.token : '' }),
           credentials: 'omit', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(20000),
         });
+      } else if (useLocalService) {
+        response = await fetch('./api/local-query', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ site: site.url, endpoint, userId: authenticated ? site.userId : '', token: authenticated ? site.token : '' }),
+          credentials: 'same-origin', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(20000),
+        });
       } else {
         const headers = { Accept: 'application/json' };
         if (authenticated) { headers.Authorization = `Bearer ${site.token}`; headers['New-Api-User'] = site.userId; }
         response = await fetch(new URL(endpoint, site.url), { headers, credentials: 'omit', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(20000) });
       }
     } catch {
+      if (useLocalService) throw new Error('查询服务没有响应，请稍后重试。');
       throw new Error(navigator.onLine ? '连接失败：请检查网络，或站点是否允许网页跨域访问。' : '当前离线，无法刷新。');
     }
-    if (!response.ok) {
-      if ([401, 403].includes(response.status)) throw new Error(`站点或转发服务拒绝访问（HTTP ${response.status}），请检查设置。`);
-      throw new Error(`查询返回 HTTP ${response.status}，请检查站点或转发服务。`);
-    }
     let result;
-    try { result = await response.json(); } catch { throw new Error('站点没有返回可识别的数据，可能需要先通过站点验证。'); }
-    if (!result || result.success !== true || !result.data || typeof result.data !== 'object') throw new Error('站点没有接受查询，请核对用户 ID 和系统访问令牌。');
+    try { result = await response.json(); } catch { result = null; }
+    let reason = typeof result?.message === 'string' ? result.message :
+      typeof result?.error === 'string' ? result.error :
+      typeof result?.error?.message === 'string' ? result.error.message : '';
+    for (const secret of [site.token, proxy.key]) {
+      if (secret) reason = reason.split(secret).join('[已隐藏]');
+    }
+    reason = reason.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+    const missingScope = reason.match(/^the access token lacks the required permission:\s*([a-z_]+:[a-z_]+)$/i);
+    if (missingScope) {
+      const scope = missingScope[1];
+      const label = { 'profile:read': '资料读取', 'usage:read': '用量读取' }[scope];
+      reason = `系统访问令牌缺少 ${scope}${label ? `（${label}）` : ''} 权限，请在站点的令牌设置中启用。`;
+    } else if (/^unauthorized,\s*invalid access token$/i.test(reason)) {
+      reason = '系统访问令牌无效，请核对是否属于这个站点、是否已失效。';
+    }
+    if (!response.ok) {
+      if (reason) throw new Error(`${reason}（HTTP ${response.status}）`);
+      if ((response.headers.get('content-type') || '').includes('text/html')) {
+        throw new Error(`返回的是网页而不是接口数据（HTTP ${response.status}），可能触发了站点安全验证。`);
+      }
+      throw new Error(`查询返回 HTTP ${response.status}，站点没有提供具体原因。`);
+    }
+    if (!result) throw new Error('站点没有返回可识别的数据，可能需要先通过站点验证。');
+    if (result.success !== true || !result.data || typeof result.data !== 'object') {
+      throw new Error(reason ? `站点返回：${reason}` : '站点没有接受查询，也没有提供具体原因。');
+    }
     return envelope ? result : result.data;
   }
   function displayUnit(status) {
@@ -177,6 +216,15 @@
     const query = new URLSearchParams({ p: String(page), page_size: '20', type: String(type) });
     return remote(site, `/api/log/self?${query}`, true);
   }
+  async function usagePage(id, page, start, end) {
+    const site = getSite(id);
+    if (!site.userId || !site.token) throw new Error('请先连接站点。');
+    const query = new URLSearchParams({ p: String(page), page_size: '100', type: '2', start_timestamp: String(start), end_timestamp: String(end) });
+    return remote(site, `/api/log/self?${query}`, true);
+  }
+  async function usageUnit(id) {
+    return displayUnit(await remote(getSite(id), '/api/status', false));
+  }
   async function recharge(id) {
     const site = getSite(id);
     if (site.rechargeUrl) return site.rechargeUrl;
@@ -207,13 +255,59 @@
       isPublic,
     };
   }
+  async function performance(id) {
+    const site = getSite(id), endpoint = '/api/perf-metrics/summary?hours=1';
+    let result;
+    try { result = await remote(site, endpoint, false); }
+    catch (error) {
+      if (!site.userId || !site.token) throw error;
+      result = await remote(site, endpoint, true);
+    }
+    if (!Array.isArray(result.models)) throw new Error('站点没有提供模型状态。');
+    return { ...result, checkedAt: Date.now() };
+  }
+  async function diagnose(id) {
+    const site = getSite(id), configured = Boolean(site.userId && site.token);
+    const required = (endpoint, verify) => async () => {
+      if (!configured) throw new Error('请先填写用户 ID 和系统访问令牌。');
+      const data = await remote(site, endpoint, true);
+      if (!verify(data)) throw new Error('站点返回的数据格式不完整。');
+      return '正常';
+    };
+    const now = new Date(), end = Math.floor(now.getTime() / 1000);
+    const start = Math.floor(new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000);
+    const checks = [
+      { label: '账户余额', run: required('/api/user/self', data => number(data.quota) !== null && number(data.used_quota) !== null) },
+      { label: '用量统计', run: required(`/api/log/self/stat?type=2&start_timestamp=${start}&end_timestamp=${end}`, data => number(data.quota) !== null) },
+      { label: '调用日志', run: required('/api/log/self?p=1&page_size=1&type=0', data => Array.isArray(data.items)) },
+      { label: '模型价格', run: async () => (await pricing(id)).isPublic ? '公开报价可读取' : '账号报价可读取' },
+    ];
+    const results = await Promise.allSettled(checks.map(check => Promise.resolve().then(check.run)));
+    return { items: results.map((result, index) => result.status === 'fulfilled'
+      ? { label: checks[index].label, ok: true, message: result.value }
+      : { label: checks[index].label, ok: false, message: result.reason?.message || '读取失败。' }) };
+  }
+  function favoriteValues(state) {
+    return Array.isArray(state.favorites) ? state.favorites.filter(value => typeof value === 'string' && value.trim()).map(value => value.trim()) : [];
+  }
+  function favorites() { return favoriteValues(data()); }
+  function toggleFavorite(value) {
+    const term = String(value || '').trim();
+    if (!term) throw new Error('先输入想收藏的模型名称。');
+    const state = data(), existing = favoriteValues(state);
+    const matched = existing.some(item => item.toLocaleLowerCase() === term.toLocaleLowerCase());
+    state.favorites = matched ? existing.filter(item => item.toLocaleLowerCase() !== term.toLocaleLowerCase()) : [...existing, term];
+    save(state);
+    return !matched;
+  }
   function exportSites() {
-    return { version: 1, sites: data().sites.map(({ name, url, userId, threshold, rechargeUrl, costPerUnit }) => ({ name, url, userId, threshold: threshold ?? null, rechargeUrl: rechargeUrl || '', costPerUnit: costPerUnit ?? null })) };
+    const state = data();
+    return { version: 1, favorites: favoriteValues(state), sites: state.sites.map(({ name, url, userId, threshold, rechargeUrl, costPerUnit }) => ({ name, url, userId, threshold: threshold ?? null, rechargeUrl: rechargeUrl || '', costPerUnit: costPerUnit ?? null })) };
   }
   function importSites(value) {
     if (!value || value.version !== 1 || !Array.isArray(value.sites)) throw new Error('配置文件格式不正确。');
     const state = data();
-    let added = 0, skipped = 0;
+    let added = 0, skipped = 0, favoritesAdded = 0;
     for (const item of value.sites) {
       try {
         const name = String(item.name || '').trim(), url = originOf(item.url), userId = String(item.userId || '').trim();
@@ -227,11 +321,19 @@
         state.sites.push({ id: crypto.randomUUID(), name, url, userId, token: '', threshold, rechargeUrl, costPerUnit }); added++;
       } catch { skipped++; }
     }
+    const savedFavorites = favoriteValues(state);
+    for (const item of Array.isArray(value.favorites) ? value.favorites : []) {
+      if (typeof item !== 'string') continue;
+      const term = item.trim();
+      if (term && !savedFavorites.some(existing => existing.toLocaleLowerCase() === term.toLocaleLowerCase())) { savedFavorites.push(term); favoritesAdded++; }
+    }
+    state.favorites = savedFavorites;
     save(state);
-    return { added, skipped };
+    return { added, skipped, favoritesAdded };
   }
   window.ledger = {
     sites: () => data().sites.map(publicSite), upsert, remove, settings, saveSettings,
-    refresh, logs, recharge, pricing, cache, exportSites, importSites,
+    refresh, logs, usagePage, usageUnit, diagnose, recharge, pricing, performance,
+    favorites, toggleFavorite, cache, exportSites, importSites,
   };
 })();

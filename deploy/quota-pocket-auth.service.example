@@ -1,0 +1,15 @@
+[Unit]
+Description=Quota Pocket login
+After=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/quota-pocket/pocket-auth
+Environment=POCKET_AUTH_ORIGIN=https://pocket.example.com
+Environment=POCKET_AUTH_HTPASSWD=/etc/quota-pocket/htpasswd
+ExecStart=/usr/bin/node /opt/quota-pocket/pocket-auth/server.mjs
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

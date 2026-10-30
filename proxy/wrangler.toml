@@ -6,5 +6,5 @@ compatibility_date = "2026-10-01"
 # 部署前改成 PWA 的精确来源（不包含末尾斜杠或路径）。
 ALLOWED_APP_ORIGIN = "https://YOUR-PWA-ORIGIN"
 # 只允许自己要查询的站点，每个来源用逗号分隔。
-ALLOWED_SITE_ORIGINS = "https://api.dzzi.ai,https://api.ekan8.com,https://api.jiushi.xin"
+ALLOWED_SITE_ORIGINS = "https://api.dzzi.ai,https://api.ekan8.com,https://api.68886868.xyz"
 # PROXY_KEY 必须作为 Worker secret 设置，不能写进这个文件。

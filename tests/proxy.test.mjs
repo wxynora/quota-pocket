@@ -25,3 +25,14 @@ test('只向指定站点发送只读查询，拒绝越权及重定向', async ()
     response = await worker.fetch(request('https://app.example', 'https://site.example', '/api/user/self'), env); assert.equal(response.status, 502);
   } finally { globalThis.fetch = original; }
 });
+
+test('转发站方模型成功率的只读接口', async () => {
+  const original = globalThis.fetch;
+  let seen;
+  try {
+    globalThis.fetch = async (url, options) => { seen = { url: String(url), method: options.method }; return Response.json({ success: true, data: { models: [] } }); };
+    const response = await worker.fetch(request('https://app.example', 'https://site.example', '/api/perf-metrics/summary?hours=1'), env);
+    assert.equal(response.status, 200);
+    assert.deepEqual(seen, { url: 'https://site.example/api/perf-metrics/summary?hours=1', method: 'GET' });
+  } finally { globalThis.fetch = original; }
+});

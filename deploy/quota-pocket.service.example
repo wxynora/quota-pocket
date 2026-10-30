@@ -1,0 +1,15 @@
+[Unit]
+Description=Quota Pocket
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/quota-pocket
+Environment=QUOTA_POCKET_PUBLIC_ORIGIN=https://pocket.example.com
+ExecStart=/usr/bin/node /opt/quota-pocket/server.mjs
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

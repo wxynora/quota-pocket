@@ -1,5 +1,5 @@
-const CACHE = 'quota-pocket-shell-v3';
-const FILES = ['./', './index.html', './style.css', './local.js', './app.js', './pricing.mjs', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
+const CACHE = 'quota-pocket-shell-v15';
+const FILES = ['./', './index.html', './style.css', './local.js', './app.js', './pricing.mjs', './usage.mjs', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)).then(() => self.skipWaiting()));
 });
@@ -12,7 +12,8 @@ self.addEventListener('fetch', (event) => {
   const allowed = FILES.some((file) => new URL(file, self.registration.scope).href === url.href);
   if (!allowed) return;
   event.respondWith(fetch(event.request).then(async (response) => {
-    if (response.ok) { const cache = await caches.open(CACHE); await cache.put(event.request, response.clone()); }
+    if (response.redirected && event.request.mode === 'navigate') return Response.redirect(response.url, 302);
+    if (response.ok && !response.redirected) { const cache = await caches.open(CACHE); await cache.put(event.request, response.clone()); }
     return response;
   }).catch(async () => {
     const cached = await caches.match(event.request);

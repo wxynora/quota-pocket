@@ -1,4 +1,4 @@
-const paths = new Set(['/api/status', '/api/pricing', '/api/user/self', '/api/log/self', '/api/log/self/stat']);
+const paths = new Set(['/api/status', '/api/pricing', '/api/perf-metrics/summary', '/api/user/self', '/api/log/self', '/api/log/self/stat']);
 
 function respond(body, status, origin) {
   return new Response(JSON.stringify(body), { status, headers: {
