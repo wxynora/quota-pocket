@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; img-src 'self' data:; object-src 'none'; base-uri 'none'">
+  <meta name="theme-color" content="#f7f7fe">
+  <title>额度口袋</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./local.js" defer></script>
+  <script src="./app.js" type="module"></script>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 36 40" fill="none" aria-hidden="true"><rect x="7" y="3" width="25" height="34" rx="4" stroke="currentColor" stroke-width="1.8"/><path d="M12 3v34M4 10h6M4 20h6M4 30h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M23 14.5c-1.1-1.5-3.4-.8-3.4 1 0 1.5 1.8 2.8 3.4 4 1.6-1.2 3.4-2.5 3.4-4 0-1.8-2.3-2.5-3.4-1Z" stroke="#dc8ab0" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        <span>额度口袋</span>
+      </div>
+      <div class="toolbar">
+        <button class="pill pill-neutral" id="open-settings" type="button">设置</button>
+        <button class="pill pill-neutral" id="compare-open" type="button">模型比价</button>
+        <button class="pill pill-pink" id="add-site" type="button"><span class="button-symbol">＋</span> 添加站点</button>
+        <button class="pill pill-blue" id="refresh-all" type="button"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 7v4h-4M4 17v-4h4M19 11a7 7 0 0 0-12-4L5 9m14 6-2 2a7 7 0 0 1-12-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>刷新全部</span></button>
+      </div>
+    </header>
+
+    <section class="intro" aria-labelledby="page-title">
+      <svg class="doodle doodle-smile" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M14 14C24 4 44 7 52 17c8 10 5 27-6 35-11 8-29 5-36-7-7-11-5-23 4-31Z" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M24 25v3m16-5 1 3M23 36c4 8 13 10 20 1" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>
+      <svg class="doodle doodle-star" viewBox="0 0 50 50" fill="none" aria-hidden="true"><path d="m25 4 4 14 14 1-11 9 3 15-11-8-11 8 3-15-11-9 15-1L25 4Z" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"/></svg>
+      <h1 id="page-title">今天的小金库</h1>
+      <p>所有站点的余额，都在这里啦。</p>
+      <div class="summary" id="summary">正在打开小账本…</div>
+    </section>
+
+    <section aria-label="我的中转站" class="sites-section">
+      <div class="section-tools">
+        <div class="filters"><input type="search" id="search" aria-label="搜索站点" placeholder="搜索站点或地址"><select id="filter" aria-label="筛选站点"><option value="all">全部站点</option><option value="low">余额偏低</option><option value="unconnected">待连接</option></select></div>
+        <div class="transfer"><button type="button" id="import-sites">导入配置</button><button type="button" id="export-sites">导出配置</button><input type="file" id="import-file" accept="application/json,.json" hidden></div>
+      </div>
+      <div id="site-list" class="site-list" aria-live="polite"></div>
+      <p class="empty-list" id="empty-list" hidden>这里还没有站点，点右上角添加一个吧。</p>
+    </section>
+
+    <footer class="footer">
+      <svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><circle cx="20" cy="20" r="15" stroke="currentColor" stroke-width="2"/><path d="M14 16v2m12-2v2M14 24c3 4 9 5 12 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <p id="footer-message">连接站点后，就能在这里查看余额啦。</p>
+    </footer>
+  </main>
+
+  <template id="site-template">
+    <article class="site-card">
+      <div class="site-identity">
+        <span class="site-icon" aria-hidden="true"></span>
+        <div class="site-name-wrap"><h2 class="site-name"></h2><a class="site-link" target="_blank" rel="noopener noreferrer"></a><p class="site-state"></p></div>
+      </div>
+      <dl class="metrics">
+        <div><dt>剩余额度</dt><dd data-value="remaining">—</dd></div>
+        <div><dt>累计使用</dt><dd data-value="used">—</dd></div>
+        <div><dt>今日用量</dt><dd data-value="today">—</dd></div>
+        <div><dt>本月用量</dt><dd data-value="month">—</dd></div>
+      </dl>
+      <div class="site-actions"><button type="button" class="mini-refresh" aria-label="刷新站点">↻</button><button type="button" class="pill site-action"></button><button type="button" class="text-action models-action">模型价格</button><button type="button" class="text-action logs-action">调用日志</button><button type="button" class="text-action recharge-action">去充值 ↗</button></div>
+    </article>
+  </template>
+
+  <dialog id="site-dialog" aria-labelledby="dialog-title">
+    <form id="site-form" novalidate>
+      <div class="dialog-heading"><div><p class="dialog-kicker">MY LITTLE ACCOUNT BOOK</p><h2 id="dialog-title">添加站点</h2></div><button type="button" id="close-dialog" class="close-button" aria-label="关闭">×</button></div>
+      <p class="dialog-desc">填写一次，之后就可以一起刷新啦。</p>
+      <input id="site-id" type="hidden">
+      <label for="site-name">站点名称</label>
+      <input id="site-name" name="name" type="text" placeholder="比如：我的中转站" autocomplete="off" required>
+      <label for="site-url">站点地址</label>
+      <input id="site-url" name="url" type="url" placeholder="https://example.com" autocomplete="url" required>
+      <div class="form-split">
+        <div><label for="user-id">用户 ID</label><input id="user-id" name="userId" type="text" inputmode="numeric" placeholder="数字 ID" autocomplete="off" required></div>
+        <div><label for="token">系统访问令牌</label><input id="token" name="token" type="password" placeholder="粘贴访问令牌" autocomplete="off"></div>
+      </div>
+      <label for="threshold">余额提醒（可选）</label>
+      <input id="threshold" name="threshold" type="number" min="0" step="any" placeholder="留空则不提醒；按站点显示单位填写">
+      <label for="recharge-url">充值页地址（可选）</label>
+      <input id="recharge-url" name="rechargeUrl" type="url" placeholder="留空时根据站点主题自动识别">
+      <label for="cost-per-unit">比价兑换比例（可选）</label>
+      <input id="cost-per-unit" name="costPerUnit" type="number" min="0.00000001" step="any" placeholder="每 1 站内显示单位实际花费多少元">
+      <p class="form-help">例如花 ¥50 充值得到 100 站内额度，填 0.5。比价会据此折算人民币。</p>
+      <p class="form-help">账号信息可留空，填写后可查看余额和日志。在站点「个人设置」中查找用户 ID 和系统访问令牌；它与调用模型的 API Key 不同。</p>
+      <p class="form-help storage-note">令牌保存在此设备的浏览器数据中，未加密；导出配置不包含令牌。</p>
+      <p id="form-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="delete-button" id="delete-site" hidden>移除站点</button><span class="action-spacer"></span><button type="button" class="cancel-button" id="cancel-dialog">取消</button><button class="save-button" type="submit" id="save-site">保存</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="compare-dialog" aria-labelledby="compare-title">
+    <div class="logs-panel">
+      <div class="dialog-heading"><div><p class="dialog-kicker">PRICE COMPARISON</p><h2 id="compare-title">模型比价</h2></div><button type="button" id="compare-close" class="close-button" aria-label="关闭">×</button></div>
+      <div class="model-controls compare-controls"><input id="compare-search" type="search" placeholder="输入模型名称，例如 claude" aria-label="搜索比价模型"><select id="compare-type" aria-label="计费方式"><option value="all">全部计费</option><option value="token">按量</option><option value="call">按次</option></select><select id="compare-sort" aria-label="按量排序方式"><option value="input">按输入价排序</option><option value="output">按输出价排序</option></select></div>
+      <p class="form-help">按各站填写的充值兑换比例折算人民币；按量与按次分别排序。缓存、多模态、分组和密钥权限以站点为准。</p>
+      <div id="compare-message" class="log-message" aria-live="polite"></div><div id="compare-list" class="models-list"></div>
+    </div>
+  </dialog>
+
+  <dialog id="models-dialog" aria-labelledby="models-title">
+    <div class="logs-panel">
+      <div class="dialog-heading"><div><p class="dialog-kicker">MODEL PRICES</p><h2 id="models-title">模型与价格</h2></div><button type="button" id="models-close" class="close-button" aria-label="关闭">×</button></div>
+      <div class="model-controls"><input id="model-search" type="search" placeholder="搜索模型名称" aria-label="搜索模型"><select id="model-group" aria-label="模型分组"></select></div>
+      <p id="model-note" class="form-help"></p><div id="models-message" class="log-message" aria-live="polite"></div><div id="models-list" class="models-list"></div>
+    </div>
+  </dialog>
+
+  <dialog id="logs-dialog" aria-labelledby="logs-title">
+    <div class="logs-panel">
+      <div class="dialog-heading"><div><p class="dialog-kicker">USAGE LOG</p><h2 id="logs-title">调用日志</h2></div><button type="button" id="logs-close" class="close-button" aria-label="关闭">×</button></div>
+      <div class="log-controls"><select id="log-type" aria-label="日志类型"><option value="0">全部记录</option><option value="2">消费记录</option><option value="4">错误记录</option></select><span class="log-hint">显示范围以站点提供的记录为准</span></div>
+      <div id="log-message" class="log-message" aria-live="polite"></div>
+      <div id="log-list" class="log-list"></div>
+      <div class="log-pagination"><button type="button" id="log-prev">上一页</button><span id="log-page"></span><button type="button" id="log-next">下一页</button></div>
+    </div>
+  </dialog>
+
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <form id="settings-form">
+      <div class="dialog-heading"><div><p class="dialog-kicker">QUOTA POCKET</p><h2 id="settings-title">连接设置</h2></div><button type="button" id="settings-close" class="close-button" aria-label="关闭">×</button></div>
+      <p class="dialog-desc">支持跨域的站点可以直接连接。需要转发时，可填写自己信任的服务。</p>
+      <label for="proxy-url">转发服务地址（可选）</label><input type="url" id="proxy-url" placeholder="https://你的转发服务地址" autocomplete="off">
+      <label for="proxy-key">转发服务口令</label><input type="password" id="proxy-key" placeholder="转发服务设置的口令" autocomplete="off">
+      <p class="form-help">启用转发后，刷新请求及站点访问令牌会经过该服务。请只填写自己控制或信任的服务；设置保存在本机浏览器。</p>
+      <p id="settings-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><span class="action-spacer"></span><button class="save-button" type="submit">保存设置</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

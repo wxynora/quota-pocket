@@ -1,0 +1,14 @@
+{
+  "name": "额度口袋",
+  "short_name": "额度口袋",
+  "description": "本地保存配置，汇总 New API 站点余额、用量和模型价格。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f7fe",
+  "theme_color": "#f7f7fe",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
